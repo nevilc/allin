@@ -4,6 +4,7 @@
 
 // HACK ish
 #include "../mouse.h"
+#include "error.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -134,7 +135,7 @@ EXPORT void mouse_scroll(struct mouse_state* state, int horizontal, int vertical
 	input[1].type = INPUT_MOUSE;
 	input[1].mi.dx = 0;
 	input[1].mi.dy = 0;
-	input[1].mi.mouseData = vertical * WHEEL_DELTA;
+	input[1].mi.mouseData = -vertical * WHEEL_DELTA;
 	input[1].mi.dwFlags = MOUSEEVENTF_WHEEL;
 	input[1].mi.time = 0;
 	input[1].mi.dwExtraInfo = (ULONG_PTR)NULL;

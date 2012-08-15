@@ -53,11 +53,13 @@ void mouse_button_set(struct mouse_state* state, mouse_button button, int updown
             event.xbutton.button = Button3;
             break;
         case MOUSE_BUTTON_4:
-            event.xbutton.button = Button4;
-            break;
+			fprintf(stderr, "Not implemented\n");
+            //event.xbutton.button = Button4;
+            return;
         case MOUSE_BUTTON_5:
-            event.xbutton.button = Button5;
-            break;
+			fprintf(stderr, "Not implemented\n");
+            //event.xbutton.button = Button5;
+            return;
         default:
             // Invalid button
 			fprintf(stderr, "Invalid mouse button '%i'\n", button);
@@ -91,7 +93,42 @@ void mouse_button_set(struct mouse_state* state, mouse_button button, int updown
 }
 
 EXPORT void mouse_scroll(struct mouse_state* state, int horizontal, int vertical) {
-	fprintf(stderr, "Not implemented\n");
+    XEvent event;
+    int i;
+
+	if (horizontal != 0) {
+		fprintf(stderr, "Not implemented\n");
+	}
+
+	for (i = 0; i < abs(vertical); ++i) {
+		memset(&event, 0, sizeof(event));
+	
+		event.xbutton.button = (vertical > 0) ? Button5 : Button4;
+		event.xbutton.same_screen = True;
+		event.xbutton.subwindow = DefaultRootWindow(state->display);
+		while (event.xbutton.subwindow) { // Find window
+			event.xbutton.window = event.xbutton.subwindow;
+			XQueryPointer(state->display,
+						  event.xbutton.window,
+						  &event.xbutton.root,
+						  &event.xbutton.subwindow,
+						  &event.xbutton.x_root,
+						  &event.xbutton.y_root,
+						  &event.xbutton.x,
+						  &event.xbutton.y,
+						  &event.xbutton.state);
+		}
+		event.type = ButtonPress;
+
+		int error_code;
+	
+		if (!(error_code = XSendEvent(state->display, PointerWindow, True, ButtonPressMask, &event))) {
+			linux_x_error(state->display, "mouse_scroll", error_code);
+		
+			return;
+		}
+	}
+    XFlush(state->display);
 }
 
 

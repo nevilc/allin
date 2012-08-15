@@ -239,16 +239,16 @@ enum keyboard_dikey
 	keyboard_dikey_num7					= DIKEYBOARD_NUMPAD7,
 	keyboard_dikey_num8					= DIKEYBOARD_NUMPAD8,
 	keyboard_dikey_num9					= DIKEYBOARD_NUMPAD9,
-	keyboard_dikey_subtract				= DIKEYBOARD_SUBTRACT,
+	keyboard_dikey_numsubtract			= DIKEYBOARD_SUBTRACT,
 	keyboard_dikey_num4					= DIKEYBOARD_NUMPAD4,
 	keyboard_dikey_num5					= DIKEYBOARD_NUMPAD5,
 	keyboard_dikey_num6					= DIKEYBOARD_NUMPAD6,
-	keyboard_dikey_add					= DIKEYBOARD_ADD,
+	keyboard_dikey_numadd				= DIKEYBOARD_ADD,
 	keyboard_dikey_num1					= DIKEYBOARD_NUMPAD1,
 	keyboard_dikey_num2					= DIKEYBOARD_NUMPAD2,
 	keyboard_dikey_num3					= DIKEYBOARD_NUMPAD3,
 	keyboard_dikey_num0					= DIKEYBOARD_NUMPAD0,
-	keyboard_dikey_decimal				= DIKEYBOARD_DECIMAL,
+	keyboard_dikey_numdecimal			= DIKEYBOARD_DECIMAL,
 	keyboard_dikey_oem_102				= DIKEYBOARD_OEM_102, // backslash?
 
 	keyboard_dikey_f11					= DIKEYBOARD_F11,
@@ -259,8 +259,14 @@ enum keyboard_dikey
 
 	//stuff
 
+	keyboard_dikey_numenter 			= DIKEYBOARD_NUMPADENTER,
 	keyboard_dikey_ctrl_r				= DIKEYBOARD_RCONTROL,
 
+	//stuff
+	
+	keyboard_dikey_numcomma 			= DIKEYBOARD_NUMPADCOMMA,
+	keyboard_dikey_numdivide 			= DIKEYBOARD_DIVIDE,
+	
 	//stuff
 
 	keyboard_dikey_alt_r				= DIKEYBOARD_RMENU,

@@ -15,7 +15,7 @@ struct keyboard_snapshot {
 };
 
 
-typedef long int keyboard_ukey;
+//typedef long int keyboard_ukey;
 typedef int keyboard_key;
 
 EXPORT struct keyboard_state* keyboard_initialize();

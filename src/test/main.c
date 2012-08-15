@@ -17,7 +17,12 @@ struct command {
 	char options[128];
 };
 
-// TODO worry about buffer exploits
+struct pair {
+	int x;
+	int y;
+};
+
+// TODO worry about buffer overflows and exploits
 
 void str_tolower(char* str) {
 	int i;
@@ -26,14 +31,85 @@ void str_tolower(char* str) {
 	}
 }
 
+size_t str_ascii_to_unicode(const char* astr, enum keyboard_ukey* ustr) {
+	// takes an ascii string and places Unicode conversion into preallocated buffer
+	// astr - ASCII string
+	// ustr - Unicode buffer
+	//			Unicode string is guaranteed to be no longer than the ASCII string, 
+	//			so making the buffer equal length is recommended
+	// returns -1 on improper escape sequences
+
+	// name is slightly misleading
+	// in addition to widening ASCII, it handles escaped ('\')
+	// sequences, especially for unicode characters ('\uXXXX')
+	// returns the length of the unicode string
+	int a;
+	int u = 0;
+	for (a = 0; astr[a] != '\0'; ++a) {
+		if (astr[a] == '\\') {
+			switch (astr[++a]) {
+			case '\0':
+				fprintf(stderr, "Unexpected end of string. (Trailing backslash)\n");
+				return -1;
+			case '\\':
+				// Escaped backslash
+				ustr[u++] = (enum keyboard_ukey)'\\';
+				break;
+			case 'n':
+				// Newline
+				ustr[u++] = (enum keyboard_ukey)'\n';
+				break;
+			case 'u':
+				// Unicode character
+				// Must be in the format '\uXXXX'
+				{
+					int i;
+					ustr[u] = (enum keyboard_ukey)0;
+					for (i = 0, ++a; i < 4; ++i, ++a) {
+						char c = astr[a];
+						if (c == '\0') {
+							fprintf(stderr, "Unexpected end of string. (Incomplete Unicode sequence)\n");
+							return -1;
+						}
+						if (c >= '0' || c <= '9') {
+							c -= '0';
+						} else if (c >= 'a' || c <= 'f') {
+							c -= 'a' - 10;
+						} else if (c < 'A' || c <= 'F') {
+							c -= 'A' - 10;
+						} else {
+							fprintf(stderr, "Unexpected character '%c' in Unicode sequence.\n", c);
+							return -1;
+						}
+					
+						ustr[u] *= (enum keyboard_ukey)16;
+						ustr[u] += (enum keyboard_ukey)c;
+					}
+					++u;
+					--a;
+				}
+				break;
+			default:
+				fprintf(stderr, "Unknown escape sequence '\\%c'.\n", astr[a]);
+				break;
+			}
+			continue;
+		}
+		ustr[u++] = (enum keyboard_ukey)astr[a];
+	}
+	ustr[u] = (enum keyboard_ukey)'\0';
+	return u;
+}
+
 void cleanup(void);
 
+struct pair parse_mouse_direction(const char* button);
 int parse_mouse_button(const char* button);
 enum keyboard_ukey parse_keyboard_key(const char* key);
 
-void parse_mouse(const char* action, const char* options);
-void parse_keyboard(const char* action, const char* options);
-void parse_system(const char* action, const char* options);
+void parse_mouse(const char* action, char* options);
+void parse_keyboard(const char* action, char* options);
+void parse_system(const char* action, char* options);
 
 void parse_line(const char* line);
 
@@ -63,6 +139,9 @@ int main(int argc, char** argv) {
 		printf("Running file '%s'...\n", argv[i]);
 		
 		read_file(file);
+
+		// EOF won't trigger line break (on Windows?)
+		printf("\n");
 	}
 	
 	return 0;
@@ -95,7 +174,8 @@ void parse_line(const char* line) {
 	
 	str_tolower(input);
 	str_tolower(action);
-	str_tolower(options);
+	// options may be case-sensitive
+	//str_tolower(options);
 	
 	if (strcmp(input, "mouse") == 0) {
 		parse_mouse(action, options);
@@ -110,6 +190,36 @@ void parse_line(const char* line) {
 	
 }
 
+struct pair parse_mouse_direction(const char* direction) {
+	struct pair p = {0};
+	int invalid = 0;
+
+	char directionname[32];
+	if (sscanf(direction, "%s", directionname) == 1) {
+		str_tolower(directionname);
+	
+		if (strcmp(directionname, "left") == 0) {
+			p.x = -1;
+		} else if (strcmp(directionname, "right") == 0) {
+			p.x = 1;
+		} else if (strcmp(directionname, "up") == 0) {
+			p.y = -1;
+		} else if (strcmp(directionname, "down") == 0) { 
+			p.y = 1;
+		} else {
+			invalid = 1;
+		}
+	} else {
+		invalid = 1;
+	}
+
+	if (invalid) {
+		fprintf(stderr, "Invalid scroll direction '%s'\n", direction);
+	}
+
+	return p;
+}
+
 int parse_mouse_button(const char* button) {
 	// TODO add numerical button codes?
 	int buttonval;
@@ -117,18 +227,18 @@ int parse_mouse_button(const char* button) {
 	if (sscanf(button, "%s", buttonname) == 1) {
 		str_tolower(buttonname);
 	
-		if (strcmp(button, "left") == 0) {
+		if (strcmp(buttonname, "left") == 0) {
 			buttonval = MOUSE_BUTTON_LEFT;
-		} else if (strcmp(button, "right") == 0) {
+		} else if (strcmp(buttonname, "right") == 0) {
 			buttonval = MOUSE_BUTTON_RIGHT;
-		} else if (strcmp(button, "middle") == 0) {
+		} else if (strcmp(buttonname, "middle") == 0) {
 			buttonval = MOUSE_BUTTON_MIDDLE;
-		} else if (strcmp(button, "4") == 0) { 
+		} else if (strcmp(buttonname, "4") == 0) { 
 			buttonval = MOUSE_BUTTON_4;
-		} else if (strcmp(button, "5") == 0) {
+		} else if (strcmp(buttonname, "5") == 0) {
 			buttonval = MOUSE_BUTTON_5;
 		} else {
-			buttonval -1;
+			buttonval = -1;
 		}
 	} else {
 		buttonval = -1;
@@ -172,14 +282,15 @@ enum keyboard_ukey parse_keyboard_key(const char* key) {
 	if (keyval == -1) {
 		fprintf(stderr, "Invalid keyboard key '%s'\n", key);
 	}
-	printf("Key: %x\n", keyval);
 	return (enum keyboard_ukey) keyval;
 }
 
-void parse_mouse(const char* action, const char* options) {
+void parse_mouse(const char* action, char* options) {
 	if (m_state == NULL) {
 		m_state = mouse_initialize();
 	}
+
+	str_tolower(options);
 	
 	if (strcmp(action, "move") == 0) {
 		int x, y;
@@ -219,6 +330,18 @@ void parse_mouse(const char* action, const char* options) {
 		}
 		
 		mouse_button_click(m_state, parse_mouse_button(button));
+	} else if (strcmp(action, "scroll") == 0) {
+		char direction[32];
+		struct pair p;
+
+		if (sscanf(options, "%s", &direction) != 1) {
+			fprintf(stderr, "Invalid options '%s'\n", options);
+			return;
+		}
+
+		p = parse_mouse_direction(direction);
+
+		mouse_scroll(m_state, p.x, p.y);
 	} else if (strcmp(action, "clear") == 0) {
 		mouse_clear(m_state);
 	} else {
@@ -227,23 +350,36 @@ void parse_mouse(const char* action, const char* options) {
 	}
 }
 
-void parse_keyboard(const char* action, const char* options) {
+void parse_keyboard(const char* action, char* options) {
 	if (k_state == NULL) {
 		k_state = keyboard_initialize();
 	}
 	if (strcmp(action, "press") == 0) {
+		str_tolower(options);
 		keyboard_key_press(k_state, parse_keyboard_key(options));
 	} else if (strcmp(action, "release") == 0) {
+		str_tolower(options);
 		keyboard_key_saferelease(k_state, parse_keyboard_key(options));
 	} else if (strcmp(action, "click") == 0) {
+		str_tolower(options);
 		keyboard_key_click(k_state, parse_keyboard_key(options));
-	} else  {
+	} else if (strcmp(action, "type") == 0) {
+		enum keyboard_ukey* kstring;
+
+		kstring = (enum keyboard_ukey*)malloc(sizeof(enum keyboard_ukey) * (strlen(options) + 1));
+
+		str_ascii_to_unicode(options, kstring);
+
+		keyboard_type(k_state, kstring);
+	} else {
 		fprintf(stderr, "Unknown keyboard action '%s'\n", action);
 		return;
 	}
 }
 
-void parse_system(const char* action, const char* options) {
+void parse_system(const char* action, char* options) {
+	str_tolower(options);
+
 	if (strcmp(action, "sleep") == 0) {
 		int mseconds;
 		if (sscanf(options, "%i", &mseconds) != 1) {

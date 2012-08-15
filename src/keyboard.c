@@ -1,5 +1,7 @@
 #include "keyboard.h"
 
+#include "stdio.h"
+
 EXPORT void keyboard_clear(struct keyboard_state* state) {
 
 }
@@ -23,6 +25,14 @@ EXPORT void keyboard_key_saferelease(struct keyboard_state* state, enum keyboard
 EXPORT void keyboard_key_click(struct keyboard_state* state, enum keyboard_ukey ukey) {
 	keyboard_key_press(state, ukey);
 	keyboard_key_release(state, ukey);
+}
+
+EXPORT void keyboard_type(struct keyboard_state* state, enum keyboard_ukey keys[]) {
+	int i;
+	for (i = 0; keys[i] != (enum keyboard_ukey)'\0'; ++i) {
+		printf("  %c (%i)\n", (char)keys[i], (int)keys[i]);
+		keyboard_key_click(state, keys[i]);
+	}
 }
 
 #if 0

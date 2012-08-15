@@ -4,6 +4,7 @@
 
 // HACK ish
 #include "../keyboard.h"
+#include "error.h"
 
 #include "directinput.h"
 
@@ -299,27 +300,32 @@ void keyboard_key_set(struct keyboard_state* state, enum keyboard_ukey ukey, int
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = 0;
     input.ki.wScan = keyboard_ukey_to_dikey(ukey);
-	printf("dikey: %x\n", input.ki.wScan);
 	input.ki.dwFlags = (updown == KEYBOARD_KEY_ISUP ? KEYEVENTF_KEYUP : 0);
 	if (input.ki.wScan == keyboard_dikey_na) {
+		// printscreen and break likely need KEYEVENTF_EXTENDED set
 		input.ki.wScan = ukey;
 		input.ki.dwFlags |= KEYEVENTF_UNICODE;
-	} else if (ukey == keyboard_ukey_left || ukey == keyboard_ukey_right || ukey == keyboard_ukey_up || ukey == keyboard_ukey_down) { 
-		// Arrow key DI constants are not working, so replace them with VKs
-		// Most likely other non-printing characters will fail too, 
-		// so this section will have to be expanded and moved
-		input.ki.wScan = 0;
-		if (ukey == keyboard_ukey_left) {
-			input.ki.wVk = VK_LEFT;
-		} else if (ukey == keyboard_ukey_right) {
-			input.ki.wVk = VK_RIGHT;
-		} else if (ukey == keyboard_ukey_up) {
-			input.ki.wVk = VK_UP;
-		} else if (ukey == keyboard_ukey_down) {
-			input.ki.wVk = VK_DOWN;
-		}
 	} else {
-		// Printing DirectInput characters seem to require the scancode flag 
+		switch (input.ki.wScan) {
+			// Catch all extended keys
+		case keyboard_dikey_left:
+		case keyboard_dikey_right:
+		case keyboard_dikey_up:
+		case keyboard_dikey_down:
+		case keyboard_dikey_ctrl_r:
+		case keyboard_dikey_alt_r:
+		case keyboard_dikey_insert:
+		case keyboard_dikey_delete:
+		case keyboard_dikey_home:
+		case keyboard_dikey_end:
+		case keyboard_dikey_pgup:
+		case keyboard_dikey_pgdn:
+		case keyboard_dikey_numlock:
+		case keyboard_dikey_numenter:
+			input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+		}
+
+
 		input.ki.dwFlags |= KEYEVENTF_SCANCODE;
 	}
 

@@ -49,6 +49,7 @@
 	// Windows will define min and max macros that mess everything up if we let it
 	#define NOMINMAX
 	#define WIN32_LEAN_AND_MEAN
+	#define _CRT_SECURE_NO_WARNINGS
 	
     #include <Windows.h>
 #endif//WINDOWS_OS

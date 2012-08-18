@@ -7,22 +7,94 @@
 #include "keyboard.h"
 #include "system.h"
 
-#define BUFFER_LENGTH 256
+#define DEVICE_LENGTH 33
+#define ACTION_LENGTH 33
+#define OPTIONS_LENGTH 129
+
+#define BUFFER_LENGTH DEVICE_LENGTH + ACTION_LENGTH + OPTIONS_LENGTH + 30
+
+#define MACRO_STRINGIFY(str) #str
+#define MACRO_STRING(str) MACRO_STRINGIFY(str)
 
 #define COMMENT_SYMBOL '#'
 
+#define ARRAY_GEOMETRIC_EXPANSION 2
+
+#define _MACRO_ENUM(pre, x) pre##_##x,
+#define _MACRO_STRUCT(pre, x) {pre##_##x, #x},
+
+#define MACRO_ENUM(pre) enum pre##_option { pre##_LIST(_MACRO_ENUM) pre##_option_count}
+
+#define MACRO_STRUCT(pre) struct { enum pre##_option type; char* name; } pre##_list[] = { pre##_LIST(_MACRO_STRUCT) }
+
+#define NAMED_ENUM(pre) \
+	MACRO_ENUM(pre); \
+	MACRO_STRUCT(pre);
+
+#define device_LIST(f) \
+	f(device, system) \
+	f(device, keyboard) \
+	f(device, mouse) \
+	f(device, goto)
+
+#define system_LIST(f) \
+	f(system, wait)
+
+#define keyboard_LIST(f) \
+	f(keyboard, press) \
+	f(keyboard, release) \
+	f(keyboard, click) \
+	f(keyboard, type)
+
+#define mouse_LIST(f) \
+	f(mouse, press) \
+	f(mouse, release) \
+	f(mouse, click) \
+	f(mouse, move) \
+	f(mouse, moveto) \
+	f(mouse, scroll) \
+	f(mouse, clear)
+
+NAMED_ENUM(device);
+NAMED_ENUM(system);
+NAMED_ENUM(keyboard);
+NAMED_ENUM(mouse);
+
+
+
 struct command {
-	char device[32];
-	char action[32];
-	char options[128];
+	device_option device;
+	union {
+		char action_text[ACTION_LENGTH];
+		int action_value;
+	};
+	union {
+		char options_text[OPTIONS_LENGTH];
+		int options_value;
+	};
 };
 
-struct pair {
-	int x;
-	int y;
+struct label {
+	const char* name;
+	int line;
 };
 
-// TODO worry about buffer overflows and exploits
+// Ideally a hash table or something would be used, but realistically there shouldn't be enough labels to matter
+struct label_table {
+	struct label** labels;
+	size_t length;
+	size_t _alloc_length;
+};
+
+struct script {
+	char* name;
+
+	struct command** commands;
+	size_t length;
+	size_t _alloc_length;
+
+	struct label_table* table;
+};
 
 void str_tolower(char* str) {
 	int i;
@@ -101,19 +173,71 @@ size_t str_ascii_to_unicode(const char* astr, enum keyboard_ukey* ustr) {
 	return u;
 }
 
+void grow_array(void** array, size_t element_size, size_t* length, size_t* alloc_length) {
+	if (*length >= *alloc_length) {
+		*alloc_length *= ARRAY_GEOMETRIC_EXPANSION;
+		void* new_array = (void*)malloc(element_size * *alloc_length);
+		memcpy(new_array, *array, element_size * *length);
+		free(*array);
+		*array = new_array;
+	}
+}
+
+void add_command(struct script* scr, struct command* com) {
+	grow_array((void**) &scr->commands, sizeof(struct command*), &scr->length, &scr->_alloc_length);
+	scr->commands[++scr->length] = com;
+}
+
+void add_label(struct label_table* table, struct label* l) {
+	grow_array((void**)&table->labels, sizeof(label*), &table->length, &table->_alloc_length);
+	table->labels[table->length] = l;
+}
+
+int label_to_line(struct label_table* table, const char* l) {
+	int i;
+	char* lcopy;
+
+	lcopy = (char*)malloc(sizeof(char) * (strlen(l) + 1));
+	strcpy(lcopy, l);
+
+	str_tolower(lcopy);
+
+	for (int i = 0; i < table->length; ++i) {
+		if (strcmp(lcopy, table->labels[i]->name) == 0) {
+			return table->labels[i]->line;
+		}
+	}
+
+	return -1;
+}
+
+struct pair {
+	int x;
+	int y;
+};
+
+// TODO worry about buffer overflows and exploits
+
+
+
 void cleanup(void);
 
 struct pair parse_mouse_direction(const char* button);
 int parse_mouse_button(const char* button);
 enum keyboard_ukey parse_keyboard_key(const char* key);
 
-void parse_mouse(const char* action, char* options);
-void parse_keyboard(const char* action, char* options);
-void parse_system(const char* action, char* options);
+void parse_mouse(struct script* scr, struct command* com, const char* action, const char* options);
+void parse_keyboard(struct script* scr, struct command* com, const char* action, const char* options);
+void parse_system(struct script* scr, struct command* com, const char* action, const char* options);
+void parse_goto(struct script* scr, struct command* com, const char* action, const char* options);
 
-void parse_line(const char* line);
+void parse_label(struct script* scr, const char* action);
 
-void read_file(FILE* file);
+void generate_label(struct script* scr, const char* label);
+
+struct command* parse_line(const char* line);
+
+void read_file(FILE* file, script* scr);
 
 struct mouse_state* m_state = NULL;
 struct keyboard_state* k_state = NULL;
@@ -127,18 +251,29 @@ int main(int argc, char** argv) {
 	}
 	
 	atexit(&cleanup);
-	
+
 	for (i = 1; i < argc; ++i) {
 		FILE* file = fopen(argv[i], "r");
+		script scr;
+		scr.length = 0;
+		scr._alloc_length = 20;
+		scr.commands = (struct command**)malloc(sizeof(struct command*) * scr._alloc_length);
+		scr.table = (struct label_table*)malloc(sizeof(struct label_table));
+		scr.table->length = 0;
+		scr.table->_alloc_length = 5;
+		scr.table->labels = (struct label**)malloc(sizeof(struct label*) * scr.table->_alloc_length);
 		
 		if (file == NULL) {
 			//fprintf(stderr, "Could not open file '%s'\n", argv[i]);
 			perror("Error opening file");
 			continue;
 		}
+		scr.name = (char*)malloc(sizeof(char)*(strlen(argv[i]) + 1));
+
 		printf("Running file '%s'...\n", argv[i]);
 		
-		read_file(file);
+
+		read_file(file, &scr);
 
 		// EOF won't trigger line break (on Windows?)
 		printf("\n");
@@ -147,12 +282,16 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-void read_file(FILE* file) {
+void read_file(FILE* file, struct script* scr) {
 	char buffer[BUFFER_LENGTH];
 	
 	while (fgets(buffer, BUFFER_LENGTH, file) != NULL) {
+		struct command* com;
 		printf(">%s", buffer);
-		parse_line(buffer);
+		
+		com = parse_line(scr, buffer);
+
+		add_command(scr, com);
 	}
 	
 	if (ferror(file) != 0) {
@@ -161,33 +300,53 @@ void read_file(FILE* file) {
 	}		
 }
 
-void parse_line(const char* line) {
-	char input[32];
-	char action[32];
-	char options[128];
+struct command* parse_line(struct script* scr, const char* line) {
+	char device[DEVICE_LENGTH];
+	char action[ACTION_LENGTH];
+	char options[OPTIONS_LENGTH];
+	struct command* com;
+
+	int i;
 
 	if (line[0] == '\0' || line[0] == COMMENT_SYMBOL) {
-		return;
+		return NULL;
 	}
 	
-	sscanf(line, "%s %s %[^\n]", input, action, options);
+	sscanf(line, "%"MACRO_STRING(DEVICE_LENGTH)"s %"MACRO_STRING(ACTION_LENGTH)"s %"MACRO_STRING(OPTIONS_LENGTH)"[^\n]", device, action, options);
 	
-	str_tolower(input);
+	str_tolower(device);
 	str_tolower(action);
-	// options may be case-sensitive
-	//str_tolower(options);
-	
-	if (strcmp(input, "mouse") == 0) {
-		parse_mouse(action, options);
-	} else if (strcmp(input, "keyboard") == 0) {
-		parse_keyboard(action, options);
-	} else if (strcmp(input, "system") == 0) {
-		parse_system(action, options);
-	} else {
-		fprintf(stderr, "Unknown input '%s'\n", input);
-		return;
+
+	if (strcmp(device, "label")) {
+		generate_label(scr, action);
+		return NULL;
 	}
-	
+
+	com = (struct command*)malloc(sizeof(struct command));
+
+	for (i = 0; i < device_option_count; ++i) {
+		if (strcmp(device, device_list[i].name) == 0) {
+			com->device = device_list[i].type;
+			break;
+		}
+	}
+	if (i == device_option_count) {
+		fprintf(stderr, "Unknown device '%s'\n", device);
+		exit(EXIT_FAILURE);
+	}
+
+	switch (com->device) {
+	case device_system:
+		parse_system(src, com, action, options);
+	case device_keyboard:
+		parse_keyboard(src, com, action, options);
+	case device_mouse:
+		parse_mouse(src, com, action, options);
+	case device_goto:
+		parse_goto(src, com, action, options);
+	}
+
+	return com;
 }
 
 struct pair parse_mouse_direction(const char* direction) {
@@ -285,68 +444,98 @@ enum keyboard_ukey parse_keyboard_key(const char* key) {
 	return (enum keyboard_ukey) keyval;
 }
 
-void parse_mouse(const char* action, char* options) {
+void parse_mouse(struct script* scr, struct command* com, const char* action, const char* options) {
+	char action_copy[ACTION_LENGTH];
+	char options_copy[OPTIONS_LENGTH];
+	int i;
+	
 	if (m_state == NULL) {
 		m_state = mouse_initialize();
 	}
 
-	str_tolower(options);
-	
-	if (strcmp(action, "move") == 0) {
-		int x, y;
-		if (sscanf(options, "%i %i", &x, &y) != 2) {
-			fprintf(stderr, "Invalid options '%s'\n", options);
-			return;
-		}
-		mouse_move(m_state, x, y);
-	} else if (strcmp(action, "moveto") == 0) {
-		int x, y;
-		if (sscanf(options, "%i %i", &x, &y) != 2) {
-			fprintf(stderr, "Invalid options '%s'\n", options);
-			return;
-		}
-		mouse_moveto(m_state, x, y);
-	} else if (strcmp(action, "press") == 0) {
-		char button[32];
-		if (sscanf(options, "%s", &button) != 1) {
-			fprintf(stderr, "Invalid options '%s'\n", options);
-			return;
-		}
-		
-		mouse_button_press(m_state, parse_mouse_button(button));
-	} else if (strcmp(action, "release") == 0) {
-		char button[32];
-		if (sscanf(options, "%s", &button) != 1) {
-			fprintf(stderr, "Invalid options '%s'\n", options);
-			return;
-		}
-		
-		mouse_button_release(m_state, parse_mouse_button(button));
-	} else if (strcmp(action, "click") == 0) {
-		char button[32];
-		if (sscanf(options, "%s", &button) != 1) {
-			fprintf(stderr, "Invalid options '%s'\n", options);
-			return;
-		}
-		
-		mouse_button_click(m_state, parse_mouse_button(button));
-	} else if (strcmp(action, "scroll") == 0) {
-		char direction[32];
-		struct pair p;
+	strcpy(action_copy, action);
+	strcpy(options_copy, options);
 
-		if (sscanf(options, "%s", &direction) != 1) {
-			fprintf(stderr, "Invalid options '%s'\n", options);
-			return;
+	str_tolower(action_copy);
+	str_tolower(options_copy);
+
+	for (i = 0; i < mouse_option_count; ++i) {
+		if (strcmp(action, mouse_list[i].name) == 0) {
+			com->action_value = mouse_list[i].type;
+			break;
 		}
-
-		p = parse_mouse_direction(direction);
-
-		mouse_scroll(m_state, p.x, p.y);
-	} else if (strcmp(action, "clear") == 0) {
-		mouse_clear(m_state);
-	} else {
+	}
+	if (i == mouse_option_count) {
 		fprintf(stderr, "Unknown mouse action '%s'\n", action);
-		return;
+		exit(EXIT_FAILURE);
+	}
+
+	switch (com->action_value) {
+	case mouse_move:
+		{
+			int x, y;
+			if (sscanf(options, "%i %i", &x, &y) != 2) {
+				fprintf(stderr, "Invalid options '%s'\n", options);
+				return;
+			}
+			mouse_move(m_state, x, y);
+		} break;
+	case mouse_moveto:
+		{
+			int x, y;
+			if (sscanf(options, "%i %i", &x, &y) != 2) {
+				fprintf(stderr, "Invalid options '%s'\n", options);
+				return;
+			}
+			mouse_moveto(m_state, x, y);
+		} break;
+	case mouse_press:
+		{
+			char button[32];
+			if (sscanf(options, "%s", &button) != 1) {
+				fprintf(stderr, "Invalid options '%s'\n", options);
+				return;
+			}
+		
+			mouse_button_press(m_state, parse_mouse_button(button));
+		} break;
+	case mouse_release:
+		{
+			char button[32];
+			if (sscanf(options, "%s", &button) != 1) {
+				fprintf(stderr, "Invalid options '%s'\n", options);
+				return;
+			}
+		
+			mouse_button_release(m_state, parse_mouse_button(button));
+		} break;
+	case mouse_click:
+		{
+			char button[32];
+			if (sscanf(options, "%s", &button) != 1) {
+				fprintf(stderr, "Invalid options '%s'\n", options);
+				return;
+			}
+		
+			mouse_button_click(m_state, parse_mouse_button(button));
+		} break;
+	case mouse_scroll:
+		{
+			char direction[32];
+			struct pair p;
+
+			if (sscanf(options, "%s", &direction) != 1) {
+				fprintf(stderr, "Invalid options '%s'\n", options);
+				return;
+			}
+
+			p = parse_mouse_direction(direction);
+
+			mouse_scroll(m_state, p.x, p.y);
+		} break;
+	case mouse_clear:
+		mouse_clear(m_state);
+		break;
 	}
 }
 
@@ -390,6 +579,56 @@ void parse_system(const char* action, char* options) {
 	} else {
 		fprintf(stderr, "Unknown system action '%s'\n", action);
 		return;
+	}
+}
+
+void parse_goto(struct script* scr, const char* action, char* options) {
+	struct command* com = (struct command*)malloc(sizeof(struct command));
+	int line;
+	char label[ACTION_LENGTH];
+
+	com->device = device_goto;
+
+	// Use options_value to indicate whether the label destination has been found yet
+	// Hackish, but allows for a single-pass approach
+	com->options_value = 0;
+	if (sscanf(action, "%u", &line) == 1) {
+		com->action_value = line;
+	} else if (sscanf(action, "%s", label) == 1) {
+		line = label_to_line(scr->table, label);
+		if (line == -1) {
+			char* c = (char*)malloc(sizeof(char) * (strlen(label) + 1));
+			com->action_text = c;
+			com->options_value = 1;
+		} else {
+			com->action_value = line;
+		}
+	} else {
+		fprintf(stderr, "Invalid line number or label '%s'\n", action);
+		exit(EXIT_FAILURE);
+	}
+}
+
+void parse_label(struct script* scr, const char* action) {
+	struct label* l;
+	char* name;
+	int dummy;
+
+	name = (char*)malloc(sizeof(char) * strlen(action));
+	str_tolower(name);
+	if (label_to_line(scr->table, name) != -1) {
+		// Label already exists
+		fprintf(stderr, "Duplicate label '%s' (Labels are not case-sensitive)\n", action);
+		exit(EXIT_FAILURE);
+	} else if (sscanf(action, "%i", &dummy) == 1) {
+		// Label name begins with a number
+		fprintf(stderr, "Invalid label name '%s'\n", action);
+		exit(EXIT_FAILURE);
+	} else {
+		l = (label*)malloc(sizeof(label));
+		l->line = scr->length;
+		l->name = name;
+		add_label(scr->table, l);
 	}
 }
 

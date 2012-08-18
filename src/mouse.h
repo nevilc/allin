@@ -14,8 +14,10 @@
 
 struct mouse_state;
 
+typedef int mouse_coordinate;
+
 struct mouse_coordinates {
-	int x, y;
+	mouse_coordinate x, y;
 };
 
 struct mouse_snapshot {
@@ -44,9 +46,9 @@ void mouse_button_set(struct mouse_state* state, mouse_button button, int updown
 EXPORT int mouse_button_status(struct mouse_state* state, mouse_button button);
 
 
-EXPORT void mouse_move(struct mouse_state* state, int x, int y);
+EXPORT void mouse_move(struct mouse_state* state, mouse_coordinate x, mouse_coordinate y);
 
-EXPORT void mouse_moveto(struct mouse_state* state, int x, int y);
+EXPORT void mouse_moveto(struct mouse_state* state, mouse_coordinate x, mouse_coordinate y);
 
 EXPORT int mouse_x(struct mouse_state* state);
 EXPORT int mouse_y(struct mouse_state* state);
